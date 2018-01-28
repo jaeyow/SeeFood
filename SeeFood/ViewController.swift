@@ -7,14 +7,22 @@
 //
 
 import UIKit
-import CoreML
-import Vision
+import VisualRecognitionV3
+import SVProgressHUD
+import Social
 
 class ViewController: UIViewController, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
-
+    
+    let apiKey = "9f5cd3743349001ffe3f6fb07fa9838c5699400f"
+    let version = "2018-01-29"
+    
     @IBOutlet weak var imageView: UIImageView!
+    @IBOutlet weak var cameraButton: UIBarButtonItem!
+    @IBOutlet weak var topBarImageView: UIImageView!
+    @IBOutlet weak var shareButton: UIButton!
     
     let imagePicker = UIImagePickerController()
+    var classificationResults: [String] = []
     
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -25,53 +33,52 @@ class ViewController: UIViewController, UIImagePickerControllerDelegate, UINavig
     }
     
     func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [String : Any]) {
+        cameraButton.isEnabled = false
+        
         if let pickedImage = info[UIImagePickerControllerOriginalImage] as? UIImage {
             imageView.image = pickedImage
+            SVProgressHUD.show()
             
-            guard let ciImage = CIImage(image: pickedImage) else {
-                fatalError("Could not convert UIImage to CIImage.")
-            }
+            imagePicker.dismiss(animated: true, completion: nil)
             
-            detect(image: ciImage)
-        }
-        
-        imagePicker.dismiss(animated: true, completion: nil)
-    }
-    
-    func detect(image: CIImage) {
-        // load model using Inceptionv3 model
-        guard let model = try? VNCoreMLModel(for: Inceptionv3().model) else {
-            fatalError("Loading CoreML model failed.")
-        }
-        
-        // request to classify the data
-        let request = VNCoreMLRequest(model: model) { (request, error) in
-            guard let results = request.results as? [VNClassificationObservation] else {
-                fatalError("Model failed to process image.")
-            }
+            let visualRecognition = VisualRecognition(apiKey: apiKey, version: version)
+            let imageData = UIImageJPEGRepresentation(pickedImage, 0.01)
+            let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+            let fileURL = documentsURL.appendingPathComponent("tempImage.jpg")
             
-            if let firstResult = results.first {
-                guard let navBar = self.navigationController?.navigationBar else { fatalError() }
-                let whiteColor = UIColor(red: 1.0, green: 1.0, blue: 1.0, alpha:1.0)
+            try? imageData?.write(to: fileURL, options: [])
+            
+            visualRecognition.classify(imageFile: fileURL, success: { (classifiedImages) in
+                let imageClasses = classifiedImages.images.first!.classifiers.first!.classes
                 
-                if firstResult.identifier.contains("hotdog") {
-                    self.navigationItem.title = "Hotdog!"
-                    navBar.barTintColor = UIColor(red: 0.15, green: 0.65, blue: 0.36, alpha: 1.0)
-                } else {
-                    self.navigationItem.title = "Not Hotdog!"
-                    navBar.barTintColor = UIColor(red: 0.84, green: 0.27, blue: 0.25, alpha: 1.0)
+                self.classificationResults = []
+                for imageClass in imageClasses {
+                    self.classificationResults.append(imageClass.classification)
                 }
-                navBar.tintColor = whiteColor
-                navBar.titleTextAttributes = [NSAttributedStringKey.foregroundColor: whiteColor]
-            }
-        }
-        
-        // perform classifying of image
-        let handler = VNImageRequestHandler(ciImage: image)
-        do {
-            try handler.perform([request])
-        } catch {
-            print(error)
+                
+                DispatchQueue.main.async {
+                    self.cameraButton.isEnabled = true
+                    SVProgressHUD.dismiss()
+                }
+                
+                if self.classificationResults.contains("hotdog") {
+                    DispatchQueue.main.async {
+                        self.navigationItem.title = "Hotdog!"
+                        self.navigationController?.navigationBar.barTintColor = UIColor.green
+                        self.navigationController?.navigationBar.tintColor = UIColor.yellow
+                        self.navigationController?.navigationBar.isTranslucent = false
+                        self.topBarImageView.image = UIImage(named: "hotdog")
+                    }
+                } else {
+                    DispatchQueue.main.async {
+                        self.navigationItem.title = "Not Hotdog!"
+                        self.navigationController?.navigationBar.barTintColor = UIColor.red
+                        self.navigationController?.navigationBar.tintColor = UIColor.yellow
+                        self.navigationController?.navigationBar.isTranslucent = false
+                        self.topBarImageView.image = UIImage(named: "not-hotdog")
+                    }
+                }
+            })
         }
     }
 
